@@ -4,13 +4,22 @@
 // Environment Variables), and redeploy.
 //
 // It answers GET /api/search?origin=SIN&dest=TPE&date=2027-05-13&ret=2027-05-17&currency=SGD
-// with { ok:true, offers:[ { flightNo, price, out:{...}, ret:{...} } ] }.
-// The `ret` leg is included whenever a return date is given, so the client
-// can show the inbound flight. Without a return date the offer is one-way
-// (no `ret` field). The price is the total for the whole trip (outbound +
-// return) in the requested currency.
+// with { ok:true, offers:[ { flightNo, price, out:{...}, ret:{...}, retOptions:[...] } ] }.
+//
+// SerpApi Google Flights round-trip is a TWO-STEP flow:
+//   Step 1 — the first search (type=1, return_date) returns the OUTBOUND
+//   options only. Each itinerary carries a `departure_token` and a price
+//   that is the ROUND-TRIP total for that outbound.
+//   Step 2 — a second search re-sends the same params PLUS that itinerary's
+//   `departure_token`, and returns the matching RETURN flights for it.
+// So this function makes the second call for the top few outbound offers
+// (to bound SerpApi usage on the free plan) and attaches the return legs.
+// Without a return date the offer is one-way (no `ret` field). The price is
+// the total for the whole trip (outbound + return) in the requested currency.
 
 const SERPAPI = "https://serpapi.com/search";
+const TOP_RETURN_FETCH = 4;   // how many outbound offers get a return lookup
+const MAX_RET_OPTIONS = 4;    // return options kept per outbound offer
 
 function legGroup(legs) {
   if (!legs || !legs.length) return null;
@@ -26,8 +35,9 @@ function legGroup(legs) {
 
 function toOffer(it, dest) {
   const legs = it.flights || [];
-  // Round-trip itineraries list outbound legs first, then the return legs.
-  // The return starts at the first leg that departs from the destination.
+  // Step-1 itineraries list outbound legs only. (If a response ever does
+  // include return legs after the outbound ones, split at the first leg
+  // departing from the destination.)
   let split = legs.length;
   for (let i = 0; i < legs.length; i++) {
     const dep = legs[i].departure_airport && legs[i].departure_airport.id;
@@ -41,10 +51,41 @@ function toOffer(it, dest) {
     flightNo: out.flightNo,
     price: it.price,
     out,
+    departure_token: it.departure_token || null,
   };
   const ret = legGroup(retLegs);
   if (ret) offer.ret = ret;
   return offer;
+}
+
+function toReturnOption(it) {
+  // A step-2 result: the return legs for one outbound selection.
+  const legs = it.flights || [];
+  const g = legGroup(legs);
+  if (!g) return null;
+  return g;
+}
+
+async function fetchReturnOptions(baseParams, token) {
+  // Second SerpApi call: same search params + departure_token.
+  // Returns the matching return flights for that outbound selection.
+  const params = new URLSearchParams(baseParams);
+  params.set("departure_token", token);
+  try {
+    const r = await fetch(`${SERPAPI}?${params.toString()}`);
+    const j = await r.json();
+    if (j.error) return [];
+    const its = [...(j.best_flights || []), ...(j.other_flights || [])];
+    const out = [];
+    for (const it of its) {
+      const g = toReturnOption(it);
+      if (g) out.push(g);
+      if (out.length >= MAX_RET_OPTIONS) break;
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
 }
 
 module.exports = async (req, res) => {
@@ -65,7 +106,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: false, error: "Missing SerpApi credentials — set SERPAPI_API_KEY in Vercel." });
   }
 
-  const params = new URLSearchParams({
+  const baseParams = new URLSearchParams({
     engine: "google_flights",
     departure_id: origin,
     arrival_id: dest,
@@ -73,11 +114,11 @@ module.exports = async (req, res) => {
     currency,
     api_key: key,
   });
-  if (ret) { params.set("return_date", ret); params.set("type", "1"); }
-  else { params.set("type", "2"); }
+  if (ret) { baseParams.set("return_date", ret); baseParams.set("type", "1"); }
+  else { baseParams.set("type", "2"); }
 
   try {
-    const r = await fetch(`${SERPAPI}?${params.toString()}`);
+    const r = await fetch(`${SERPAPI}?${baseParams.toString()}`);
     const j = await r.json();
     if (j.error) {
       return res.status(200).json({ ok: false, error: String(j.error) });
@@ -89,6 +130,30 @@ module.exports = async (req, res) => {
       if (o && typeof o.price === "number") offers.push(o);
       if (offers.length >= 8) break;
     }
+
+    // Step 2 (round trip only): fetch the return legs for the cheapest
+    // outbound offers, so the client can show the full round trip and
+    // coordinate the return departures. The offer price stays the step-1
+    // round-trip total; the return options supply flight numbers and times.
+    if (ret) {
+      const withToken = offers
+        .filter(o => o.departure_token)
+        .sort((a, b) => a.price - b.price)
+        .slice(0, TOP_RETURN_FETCH);
+      for (const o of withToken) {
+        const rets = await fetchReturnOptions(baseParams, o.departure_token);
+        if (rets.length) {
+          o.ret = rets[0];
+          o.retOptions = rets;
+        }
+        delete o.departure_token;
+      }
+      // Offers without a fetched return keep no departure_token in output.
+      offers.forEach(o => delete o.departure_token);
+    } else {
+      offers.forEach(o => delete o.departure_token);
+    }
+
     return res.status(200).json({ ok: true, offers });
   } catch (e) {
     return res.status(200).json({ ok: false, error: "Live fare lookup failed: " + (e && e.message ? e.message : e) });

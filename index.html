@@ -284,7 +284,7 @@
       <b>Live fares</b> come from Google Flights (pulled through SerpApi) by the small <code>server.js</code> included with this app (your API secret stays on the server, never in the browser). Start it with your free key and open the address it prints — the chip up top turns green when live mode is on. Without the server running (e.g. opened as a plain file), Waypoint still works using distance-based estimates plus the one-click search links to Google Flights, Skyscanner, Trip.com, Booking, Agoda and Traveloka.<br><br>
       <b>Cheapest fares by site.</b> The <b>Compare Trip / Traveloka / Agoda</b> button checks live prices across booking sites for the cheapest flight each way and shows every site's price, with the cheapest highlighted. Tap <b>Use cheapest</b> to put that total into the fare box. The two directions are priced as separate one-way tickets, so the site total is out + return — and it is compared against a proper round-trip ticket from live fares, since a round-trip ticket is sometimes cheaper than two one-ways. Prices come from PriceWin, which reads the sites' public pages at search time — no key needed, but reconfirm the final fare on the booking site before paying.<br><br>
       <b>Auto-refresh.</b> Tick <b>Auto-refresh live prices</b> and Waypoint re-checks live fares and site prices every 30 minutes while the page is open, for destinations you already pulled. It only runs while the tab is visible, and the <b>Updated</b> time next to it shows the last refresh. It does not run when the page is closed.<br><br>
-      <b>Arrive together.</b> After you pull live fares for a destination, Waypoint reads every flight's real arrival time and searches for the combination — one flight per friend — that lands the group in the tightest window. The <b>Cheapest ↔ Land together</b> slider tilts the pick: all the way left favours the lowest total fare, all the way right favours the smallest gap between the first and last arrival. The recommendation updates as you drag.<br><br>
+      <b>Land together, return together.</b> After you pull live fares for a destination, Waypoint reads every flight's real arrival time and searches for the combination — one flight per friend — that lands the group in the tightest window, and whose return flights also depart close together. The <b>Cheapest ↔ Land together</b> slider tilts the pick: all the way left favours the lowest total fare, all the way right favours the smallest gaps between arrivals and between return departures. The recommendation updates as you drag.<br><br>
       <b>Quota &amp; accuracy.</b> The free SerpApi plan includes a limited number of searches per month; results are live Google Flights data, so most routes return real prices and times. If you run out of quota, searches will fail until it resets or you upgrade your SerpApi plan. Always reconfirm the final fare on the airline or booking site before paying.
     </p>
   </div></details>
@@ -361,15 +361,27 @@ function recommend(dest){
   if(!byF.length)return null;
   const sW=S.weight/100,cW=1-sW;
   const ep=o=>Date.parse(o.out.arriveAt.replace(' ','T'));
+  // Return departure time (for "return together"). Null when the live offer
+  // has no return leg yet.
+  const rp=o=>o.ret&&o.ret.departAt?Date.parse(o.ret.departAt.replace(' ','T')):null;
   const targets=[...new Set([].concat(...byF.map(b=>b.offers.map(ep))))].sort((a,b)=>a-b);
-  const evalC=sel=>{const arr=sel.map(s=>ep(s.offer));return{sel,spread:(Math.max(...arr)-Math.min(...arr))/60000,cost:sel.reduce((s,x)=>s+x.offer.price,0)};};
+  const evalC=sel=>{
+    const arr=sel.map(s=>ep(s.offer));
+    const arrSpread=(Math.max(...arr)-Math.min(...arr))/60000;
+    const rets=sel.map(s=>rp(s.offer)).filter(v=>v!=null);
+    const retSpread=rets.length>1?(Math.max(...rets)-Math.min(...rets))/60000:0;
+    return{sel,spread:arrSpread,retSpread,cost:sel.reduce((s,x)=>s+x.offer.price,0)};
+  };
   const combos=[];
   targets.forEach(t=>{combos.push(evalC(byF.map(b=>{let best=b.offers[0],bd=Infinity;b.offers.forEach(o=>{const d=Math.abs(ep(o)-t);if(d<bd||(d===bd&&o.price<best.price)){bd=d;best=o;}});return{fid:b.fid,name:b.name,offer:best};})));});
   combos.push(evalC(byF.map(b=>{let best=b.offers[0];b.offers.forEach(o=>{if(o.price<best.price)best=o;});return{fid:b.fid,name:b.name,offer:best};})));
-  const costs=combos.map(c=>c.cost),spreads=combos.map(c=>c.spread);
-  const cMin=Math.min(...costs),cMax=Math.max(...costs),sMin=Math.min(...spreads),sMax=Math.max(...spreads);
+  // Togetherness = how close the outbound arrivals are (land together) plus
+  // how close the return departures are (return together). The slider
+  // balances that total togetherness against cost.
+  const costs=combos.map(c=>c.cost),togs=combos.map(c=>c.spread+c.retSpread);
+  const cMin=Math.min(...costs),cMax=Math.max(...costs),tMin=Math.min(...togs),tMax=Math.max(...togs);
   const nm=(v,a,b)=>b>a?(v-a)/(b-a):0;
-  combos.forEach(c=>c.score=cW*nm(c.cost,cMin,cMax)+sW*nm(c.spread,sMin,sMax));
+  combos.forEach(c=>c.score=cW*nm(c.cost,cMin,cMax)+sW*nm(c.spread+c.retSpread,tMin,tMax));
   combos.sort((a,b)=>a.score-b.score);
   return combos[0];}
 function applyRecommendation(dest){const rec=recommend(dest);if(!rec)return;S.prices[dest]=S.prices[dest]||{};rec.sel.forEach(s=>{S.prices[dest][s.fid]={price:s.offer.price,arrive:clock(s.offer.out.arriveAt)};});}
@@ -423,9 +435,9 @@ function otaBest(dest,fid){
   liveOffers.forEach(o=>{if(typeof o.price==="number"&&(!rt||o.price<rt.price))rt=o;});
   const rtTotal=rt?rt.price:null;
   if(rtTotal!=null&&rtTotal<owTotal){
-    return {price:rtTotal,arrive:rt.out?clock(rt.out.arriveAt):"",kind:"rt",owTotal,rtTotal};
+    return {price:rtTotal,arrive:rt.out?clock(rt.out.arriveAt):"",kind:"rt",owTotal,rtTotal,rtOffer:rt};
   }
-  return {price:owTotal,arrive:out?clock(out.arriveAt):"",kind:"ow",owTotal,rtTotal};
+  return {price:owTotal,arrive:out?clock(out.arriveAt):"",kind:"ow",owTotal,rtTotal,rtOffer:rt};
 }
 function otaPanel(dest){
   const o=S.ota[dest];if(!o)return "";
@@ -440,8 +452,16 @@ function otaPanel(dest){
     const upd=d.updatedAt?` · updated ${new Date(d.updatedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`:"";
     const owLbl=S.roundTrip?"Two one-ways":"Cheapest site fare";
     const rtLbl=S.roundTrip?"Round-trip ticket":"Live fare";
+    // Show the round-trip ticket's actual flights (outbound + return, with
+    // times) so the price is tied to a schedule, like a booking.
+    const rtFlights=(()=>{
+      const o=best.rtOffer;if(!o||!o.out)return "";
+      const f1=`${o.out.flightNo||""} ${dayLbl(o.out.departAt)} ${clock(o.out.departAt)}→${clock(o.out.arriveAt)}`;
+      const f2=o.ret?` · ↩ ${o.ret.flightNo||""} ${dayLbl(o.ret.departAt)} ${clock(o.ret.departAt)}→${clock(o.ret.arriveAt)}`:"";
+      return `<br><small>${f1}${f2}</small>`;
+    })();
     const rtLine=best.rtTotal!=null
-      ?`<span>${rtLbl} <b>${fmtCur(best.rtTotal)}</b>${best.kind==="rt"?' ★ cheapest':''}</span>`
+      ?`<span>${rtLbl} <b>${fmtCur(best.rtTotal)}</b>${best.kind==="rt"?' ★ cheapest':''}${rtFlights}</span>`
       :`<span style="color:var(--muted2)">Pull live fares to compare a ${S.roundTrip?'round-trip ticket':'live fare'}</span>`;
     return `<div class="ota-row">
       <div class="ota-who">${escapeHtml(f.name||'—')}<small>${a.iata} → ${dest}${upd}</small></div>
@@ -567,10 +587,10 @@ function recPanel(dest){const rec=recommend(dest);if(!rec)return"";
     <div class="rwho">${escapeHtml(s.name||'—')}<small>${o.flightNo} · ${stopLbl(o.out.stops)} · ${durLbl(o.out.durationMin)}</small></div>
     <div class="rtime">${dayLbl(o.out.departAt)} ${clock(o.out.departAt)} → <b>${dayLbl(o.out.arriveAt)} ${clock(o.out.arriveAt)}</b>${ret}</div>
     <div class="rprice">${fmtCur(o.price)}</div></div>`;}).join("");
-  return `<div class="rec"><h3>Recommended schedule — arrive together</h3>
-    <p class="recsub">Best one-flight-each combination at your current balance. Times are local at each airport.</p>
+  return `<div class="rec"><h3>Recommended schedule — land together, return together</h3>
+    <p class="recsub">Best one-flight-each combination at your current balance. Outbound arrivals close together, and return departures close together. Times are local at each airport.</p>
     ${rows}
-    <div class="recfoot"><span class="win">Everyone lands within <b>${fmtSpread(rec.spread)}</b></span><span class="sum">Group total <b>${fmtCur(rec.cost)}</b></span></div></div>`;}
+    <div class="recfoot"><span class="win">Everyone lands within <b>${fmtSpread(rec.spread)}</b>${rec.retSpread>0?` · Return together, depart within <b>${fmtSpread(rec.retSpread)}</b>`:''}</span><span class="sum">Group total <b>${fmtCur(rec.cost)}</b></span></div></div>`;}
 
 function legRow(dest,p){const L=links(p.from.iata,dest);const pr=(S.prices[dest]&&S.prices[dest][p.fid])||{};
   const order=["Google","Skyscanner","Kayak","Trip.com","Booking","Agoda","Traveloka"];
