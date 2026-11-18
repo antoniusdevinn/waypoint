@@ -18,7 +18,7 @@
 // the total for the whole trip (outbound + return) in the requested currency.
 
 const SERPAPI = "https://serpapi.com/search";
-const TOP_RETURN_FETCH = 4;   // how many outbound offers get a return lookup
+const TOP_RETURN_FETCH = 8;   // fetch return legs for every outbound offer
 const MAX_RET_OPTIONS = 4;    // return options kept per outbound offer
 
 function legGroup(legs) {
@@ -131,24 +131,26 @@ module.exports = async (req, res) => {
       if (offers.length >= 8) break;
     }
 
-    // Step 2 (round trip only): fetch the return legs for the cheapest
-    // outbound offers, so the client can show the full round trip and
-    // coordinate the return departures. The offer price stays the step-1
+    // Step 2 (round trip only): fetch the return legs for every outbound
+    // offer, in parallel, so the client can show the full round trip and
+    // coordinate the return departures for any offer the recommendation
+    // picks — not just the cheapest few. The offer price stays the step-1
     // round-trip total; the return options supply flight numbers and times.
     if (ret) {
       const withToken = offers
         .filter(o => o.departure_token)
         .sort((a, b) => a.price - b.price)
         .slice(0, TOP_RETURN_FETCH);
-      for (const o of withToken) {
-        const rets = await fetchReturnOptions(baseParams, o.departure_token);
+      const results = await Promise.all(
+        withToken.map(o => fetchReturnOptions(baseParams, o.departure_token))
+      );
+      withToken.forEach((o, i) => {
+        const rets = results[i];
         if (rets.length) {
           o.ret = rets[0];
           o.retOptions = rets;
         }
-        delete o.departure_token;
-      }
-      // Offers without a fetched return keep no departure_token in output.
+      });
       offers.forEach(o => delete o.departure_token);
     } else {
       offers.forEach(o => delete o.departure_token);

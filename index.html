@@ -159,8 +159,8 @@
   .recfoot .win b{color:var(--jade)}.recfoot .sum b{color:var(--amber);font-size:16px}
   @media(max-width:620px){.recrow{grid-template-columns:1fr auto}.recrow .rprice{grid-column:2;text-align:right}.recrow .rtime{grid-column:1 / -1;text-align:left}}
 
-  .colhead{display:grid;grid-template-columns:1.2fr 2.4fr .8fr .8fr;gap:10px;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);padding:10px 0 2px;font-weight:600}
-  .legrow{display:grid;grid-template-columns:1.2fr 2.4fr .8fr .8fr;gap:10px;align-items:start;padding:11px 0;border-bottom:1px solid var(--line)}
+  .colhead{display:grid;grid-template-columns:1.6fr .8fr .8fr;gap:10px;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);padding:10px 0 2px;font-weight:600}
+  .legrow{display:grid;grid-template-columns:1.6fr .8fr .8fr;gap:10px;align-items:start;padding:11px 0;border-bottom:1px solid var(--line)}
   .legrow:last-child{border-bottom:none}
   .legrow .who{font-weight:600;font-size:14px}
   .legrow .who small{display:block;color:var(--muted);font-family:var(--mono);font-size:11.5px;font-weight:400}
@@ -173,7 +173,7 @@
   .opt{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   .opt b{color:var(--ink)}.opt .pk{color:var(--amber);cursor:pointer;font-weight:700}.opt .pk:hover{text-decoration:underline}
   .legrow input{padding:7px 9px;font-size:13px}
-  @media(max-width:760px){.legrow,.colhead{grid-template-columns:1fr 1fr}.legrow .src-cell{grid-column:1 / -1;order:3}.colhead .h-src{display:none}}
+  @media(max-width:760px){.legrow,.colhead{grid-template-columns:1fr 1fr}}
   .body-foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px;font-size:12.5px;color:var(--muted)}
   .body-foot .tot{font-family:var(--mono);color:var(--ink)}.body-foot .tot b{color:var(--amber);font-size:15px}
 
@@ -264,7 +264,7 @@
     <h2>Best places to meet</h2>
     <div class="ranktools">
       <span>Rank by</span>
-      <select id="rankBy"><option value="est">Estimated total fare</option><option value="real">Live / entered fares</option></select>
+      <select id="rankBy"><option value="real">Live / entered fares</option><option value="est">Estimated total fare</option></select>
       <div class="slider"><span>Cheapest</span><input type="range" id="weight" min="0" max="100" value="60"><span>Land together</span></div>
       <label class="autoref"><input type="checkbox" id="autoRefresh"> Auto-refresh live prices</label>
       <span id="lastUpdated" class="upd"></span>
@@ -310,23 +310,13 @@ function estFareUSD(km,rt){if(km<=0)return 0;let f=30+0.20*Math.pow(km,0.85);if(
 
 /* ----------------------------- state ----------------------------- */
 let S={friends:[],pinned:[],departDate:"",returnDate:"",roundTrip:false,currency:"USD",
-  prices:{},live:{},liveErr:{},loading:{},selected:null,rankBy:"est",weight:60,open:{},
+  prices:{},live:{},liveErr:{},loading:{},selected:null,rankBy:"real",weight:60,open:{},
   ota:{},otaErr:{},otaLoading:{},autoRefresh:false,lastUpdated:null};
 let uid=1, liveMode=null;
 
 /* ----------------------------- link builders ----------------------------- */
 const yymmdd=d=>d?d.slice(2,4)+d.slice(5,7)+d.slice(8,10):"";
 const ddmmyyyy=d=>d?d.slice(8,10)+'-'+d.slice(5,7)+'-'+d.slice(0,4):"";
-function links(o,d){const dep=S.departDate,ret=S.roundTrip?S.returnDate:"",rt=S.roundTrip&&ret,ol=o.toLowerCase(),dl=d.toLowerCase();const L={};
-  L.Google="https://www.google.com/travel/flights?q="+encodeURIComponent(`flights from ${o} to ${d}`+(dep?` on ${dep}`:"")+(rt?` returning ${ret}`:" one way"));
-  L.Skyscanner=`https://www.skyscanner.net/transport/flights/${ol}/${dl}/`+(dep?`${yymmdd(dep)}/`:"")+(rt?`${yymmdd(ret)}/`:"")+`?adultsv2=1`;
-  L.Kayak=`https://www.kayak.com/flights/${o}-${d}/`+(dep||"")+(rt?`/${ret}`:"");
-  L["Trip.com"]=`https://www.trip.com/flights/showfarefirst?dcity=${o}&acity=${d}`+(dep?`&ddate=${dep}`:"")+`&triptype=${rt?'rt':'ow'}`+(rt?`&rdate=${ret}`:"")+`&class=ys&quantity=1`;
-  L.Booking=`https://flights.booking.com/flights/${o}-${d}/?type=${rt?'ROUNDTRIP':'ONEWAY'}&adults=1&cabinClass=ECONOMY`+(dep?`&depart=${dep}`:"")+(rt?`&return=${ret}`:"");
-  L.Agoda=`https://www.agoda.com/flights/results?departureFrom=${o}&arrivalTo=${d}&searchType=${rt?'return':'oneway'}&adults=1&cabinType=Economy`+(dep?`&departDate=${dep}`:"")+(rt?`&returnDate=${ret}`:"");
-  L.Traveloka=`https://www.traveloka.com/en-en/flight/fullsearch?ap=${o}.${d}&dt=`+(dep?ddmmyyyy(dep):"null")+`.`+(rt?ddmmyyyy(ret):"null")+`&ps=1.0.0&sc=ECONOMY`;
-  return L;}
-
 /* ----------------------------- candidates ----------------------------- */
 function originAirports(){return S.friends.filter(f=>f.iata).map(f=>({f,a:AP[f.iata]}));}
 function destStats(dest){const D=AP[dest],ors=originAirports();
@@ -450,10 +440,35 @@ function otaPanel(dest){
     if(!out&&!ret)return "";
     const best=otaBest(dest,f.id);
     const upd=d.updatedAt?` · updated ${new Date(d.updatedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`:"";
-    const owLbl=S.roundTrip?"Two one-ways":"Cheapest site fare";
-    const rtLbl=S.roundTrip?"Round-trip ticket":"Live fare";
-    // Show the round-trip ticket's actual flights (outbound + return, with
-    // times) so the price is tied to a schedule, like a booking.
+    const who=`<div class="ota-who">${escapeHtml(f.name||'—')}<small>${a.iata} → ${dest}${upd}</small></div>`;
+    const useBtn=`<button class="btn sm teal" data-ota-use="${dest}|${f.id}">Use cheapest (${fmtCur(best.price)})</button>`;
+    // Cheapest site link for one direction (tap the site name to open it).
+    const siteLink=opt=>{
+      if(!opt||!opt.offers)return "";
+      const o=opt.offers.find(x=>x.agent===opt.cheapestAgent)||opt.offers.slice().sort((a,b)=>a.price-b.price)[0];
+      if(!o)return "";
+      return o.url?` <a href="${o.url}" target="_blank" rel="noopener">${escapeHtml(o.agent)}</a>`:` ${escapeHtml(o.agent)}`;
+    };
+    if(S.roundTrip){
+      // Round trip: show the trip as ONE round trip (outbound + return
+      // together), not as two separate one-way tickets.
+      let flights="";
+      if(best.kind==="rt"&&best.rtOffer&&best.rtOffer.out){
+        const o=best.rtOffer;
+        flights=`${o.out.flightNo||""} ${dayLbl(o.out.departAt)} ${clock(o.out.departAt)}→${clock(o.out.arriveAt)}${o.ret?` · ↩ ${o.ret.flightNo||""} ${dayLbl(o.ret.departAt)} ${clock(o.ret.departAt)}→${clock(o.ret.arriveAt)}`:""}`;
+      }else{
+        const f1=out?`${out.flightNo} ${dayLbl(out.departAt)} ${clock(out.departAt)}→${clock(out.arriveAt)}${siteLink(out)}`:"";
+        const f2=ret?` · ↩ ${ret.flightNo} ${dayLbl(ret.departAt)} ${clock(ret.departAt)}→${clock(ret.arriveAt)}${siteLink(ret)}`:"";
+        flights=f1+f2;
+      }
+      return `<div class="ota-row">
+      ${who}
+      <div class="ota-leg">Cheapest round trip <b>${fmtCur(best.price)}</b> · ${flights}</div>
+      <div class="ota-foot">${useBtn}</div>
+    </div>`;
+    }
+    const owLbl="Cheapest site fare";
+    const rtLbl="Live fare";
     const rtFlights=(()=>{
       const o=best.rtOffer;if(!o||!o.out)return "";
       const f1=`${o.out.flightNo||""} ${dayLbl(o.out.departAt)} ${clock(o.out.departAt)}→${clock(o.out.arriveAt)}`;
@@ -462,17 +477,16 @@ function otaPanel(dest){
     })();
     const rtLine=best.rtTotal!=null
       ?`<span>${rtLbl} <b>${fmtCur(best.rtTotal)}</b>${best.kind==="rt"?' ★ cheapest':''}${rtFlights}</span>`
-      :`<span style="color:var(--muted2)">Pull live fares to compare a ${S.roundTrip?'round-trip ticket':'live fare'}</span>`;
+      :`<span style="color:var(--muted2)">Pull live fares to compare a live fare</span>`;
     return `<div class="ota-row">
-      <div class="ota-who">${escapeHtml(f.name||'—')}<small>${a.iata} → ${dest}${upd}</small></div>
+      ${who}
       ${otaDirLine("Out",out)}
-      ${S.roundTrip?otaDirLine("Ret",ret):""}
-      <div class="ota-foot"><span>${owLbl} <b>${fmtCur(best.owTotal)}</b>${best.kind==="ow"?' ★ cheapest':''}</span>${rtLine}<button class="btn sm teal" data-ota-use="${dest}|${f.id}">Use cheapest (${fmtCur(best.price)})</button></div>
+      <div class="ota-foot"><span>${owLbl} <b>${fmtCur(best.owTotal)}</b>${best.kind==="ow"?' ★ cheapest':''}</span>${rtLine}${useBtn}</div>
     </div>`;
   }).join("");
   if(!rows)return "";
   return `<div class="ota"><h4>Cheapest fares by site</h4>
-    <p class="otasub">Live prices per booking site for the cheapest flight each way. The two directions are separate one-way tickets, so the site total is out + return — and it is compared against a proper round-trip ticket from live fares, since a round-trip ticket is sometimes cheaper. Tap a site to open it.</p>
+    <p class="otasub">${S.roundTrip?"The cheapest way to fly the round trip for each person, with both flights and the total. Tap a site name to open it.":"Live prices per booking site for the cheapest flight. Tap a site to open it."}</p>
     ${rows}</div>`;
 }
 async function pullOTA(dest,opts){
@@ -573,10 +587,10 @@ function renderResults(){const box=document.getElementById('results');box.innerH
         </div>
         ${otaPanel(d.iata)}
         ${recPanel(d.iata)}
-        <div class="colhead"><span>Traveler</span><span class="h-src">Verify / search this route</span><span>Fare (${CUR[S.currency]||S.currency})</span><span>Arrives</span></div>
+        <div class="colhead"><span>Traveler</span><span>Fare (${CUR[S.currency]||S.currency})</span><span>Arrives</span></div>
         ${d.per.map(p=>legRow(d.iata,p)).join("")}
         <div class="body-foot">
-          <span>${d.hasLive?'Live fares loaded. Drag the Cheapest ↔ Land together slider to re-pick.':'Open a source, grab the cheapest fare &amp; arrival, type them in — or pull live fares above.'}</span>
+          <span>${d.hasLive?'Live fares loaded. Move the slider to rebalance cheapest vs landing together — the recommendation updates as you drag.':'Open a source, grab the cheapest fare &amp; arrival, type them in — or pull live fares above.'}</span>
           <span class="tot">${d.realCount>0?`${d.hasLive?'Live':'Entered'}: <b>${fmtCur(d.realTotal)}</b> · ${d.realCount}/${d.per.length}`:`Rough estimate: <b>${fmtUSD(d.estTotal)}</b>`}</span>
         </div>
       </div>`;
@@ -592,16 +606,13 @@ function recPanel(dest){const rec=recommend(dest);if(!rec)return"";
     ${rows}
     <div class="recfoot"><span class="win">Everyone lands within <b>${fmtSpread(rec.spread)}</b>${rec.retSpread>0?` · Return together, depart within <b>${fmtSpread(rec.retSpread)}</b>`:''}</span><span class="sum">Group total <b>${fmtCur(rec.cost)}</b></span></div></div>`;}
 
-function legRow(dest,p){const L=links(p.from.iata,dest);const pr=(S.prices[dest]&&S.prices[dest][p.fid])||{};
-  const order=["Google","Skyscanner","Kayak","Trip.com","Booking","Agoda","Traveloka"];
-  const srcs=order.map(k=>`<a class="src" href="${L[k]}" target="_blank" rel="noopener">${k}</a>`).join("");
+function legRow(dest,p){const pr=(S.prices[dest]&&S.prices[dest][p.fid])||{};
   const offers=(S.live[dest]&&S.live[dest][p.fid])||[];
   let optHtml="";
   if(offers.length){optHtml=`<details class="opts"><summary>▸ ${offers.length} live option${offers.length>1?'s':''}</summary>`+
     offers.slice(0,8).map((o,idx)=>`<div class="opt"><span>${o.flightNo} · ${clock(o.out.departAt)}→<b>${clock(o.out.arriveAt)}</b> · ${stopLbl(o.out.stops)}${o.ret?` · ↩ ${clock(o.ret.departAt)}→<b>${clock(o.ret.arriveAt)}</b>${o.ret.flightNo?` (${o.ret.flightNo})`:''}`:''}</span><span><b>${fmtCur(o.price)}</b> <span class="pk" data-pick="${dest}|${p.fid}|${idx}">use</span></span></div>`).join("")+`</details>`;}
   return `<div class="legrow">
     <div class="who">${escapeHtml(p.name||'—')}<small>${p.from.iata} · ${p.km.toLocaleString()} km · ~${fmtUSD(p.est)}</small>${optHtml}</div>
-    <div class="src-cell"><div class="srclinks">${srcs}</div></div>
     <div><input type="number" min="0" placeholder="0" value="${pr.price!=null?pr.price:''}" data-price data-dest="${dest}" data-fid="${p.fid}"></div>
     <div><input type="time" value="${pr.arrive||''}" data-arrive data-dest="${dest}" data-fid="${p.fid}"></div>
   </div>`;}
@@ -666,14 +677,14 @@ const QUICK=[["Mei","SIN"],["Arman","KUL"],["Lena","CGK"],["Noor","DXB"],["Sam",
 /* save / load */
 document.getElementById('copyPlan').addEventListener('click',()=>{const data=JSON.stringify({v:2,friends:S.friends,pinned:S.pinned,departDate:S.departDate,returnDate:S.returnDate,roundTrip:S.roundTrip,currency:S.currency,prices:S.prices,autoRefresh:S.autoRefresh});document.getElementById('planBox').value=data;if(navigator.clipboard)navigator.clipboard.writeText(data).then(()=>toast("Plan copied to clipboard & box."),()=>toast("Plan written to the box below."));else toast("Plan written to the box below.");});
 document.getElementById('loadPlan').addEventListener('click',()=>{try{const d=JSON.parse(document.getElementById('planBox').value);S.friends=d.friends||[];S.pinned=d.pinned||[];S.departDate=d.departDate||"";S.returnDate=d.returnDate||"";S.roundTrip=!!d.roundTrip;S.currency=d.currency||"USD";S.prices=d.prices||{};S.autoRefresh=!!d.autoRefresh;uid=Math.max(1,...S.friends.map(f=>f.id+1));document.getElementById('departDate').value=S.departDate;document.getElementById('returnDate').value=S.returnDate;document.getElementById('roundTrip').checked=S.roundTrip;document.getElementById('retWrap').style.display=S.roundTrip?'block':'none';document.getElementById('currency').value=S.currency;document.getElementById('autoRefresh').checked=S.autoRefresh;render();toast("Plan loaded.");}catch(err){toast("That doesn't look like a saved plan.");}});
-document.getElementById('resetPlan').addEventListener('click',()=>{if(!confirm("Clear everyone, dates and prices?"))return;S={friends:[],pinned:[],departDate:"",returnDate:"",roundTrip:false,currency:"USD",prices:{},live:{},liveErr:{},loading:{},selected:null,rankBy:"est",weight:60,open:{},ota:{},otaErr:{},otaLoading:{},autoRefresh:false,lastUpdated:null};document.getElementById('departDate').value="";document.getElementById('returnDate').value="";document.getElementById('roundTrip').checked=false;document.getElementById('retWrap').style.display='none';document.getElementById('currency').value="USD";document.getElementById('autoRefresh').checked=false;document.getElementById('rankBy').value="est";render();toast("Cleared.");});
+document.getElementById('resetPlan').addEventListener('click',()=>{if(!confirm("Clear everyone, dates and prices?"))return;S={friends:[],pinned:[],departDate:"",returnDate:"",roundTrip:false,currency:"USD",prices:{},live:{},liveErr:{},loading:{},selected:null,rankBy:"real",weight:60,open:{},ota:{},otaErr:{},otaLoading:{},autoRefresh:false,lastUpdated:null};document.getElementById('departDate').value="";document.getElementById('returnDate').value="";document.getElementById('roundTrip').checked=false;document.getElementById('retWrap').style.display='none';document.getElementById('currency').value="USD";document.getElementById('autoRefresh').checked=false;document.getElementById("rankBy").value="real";render();toast("Cleared.");});
 
 /* default date +21d */
 (function(){const d=new Date();d.setDate(d.getDate()+21);const v=d.toISOString().slice(0,10);S.departDate=v;document.getElementById('departDate').value=v;})();
 
 
 function resetAll(){
-  S={friends:[],pinned:[],departDate:"",returnDate:"",roundTrip:false,currency:"USD",prices:{},live:{},liveErr:{},loading:{},selected:null,rankBy:"est",weight:60,open:{},ota:{},otaErr:{},otaLoading:{},autoRefresh:false,lastUpdated:null};
+  S={friends:[],pinned:[],departDate:"",returnDate:"",roundTrip:false,currency:"USD",prices:{},live:{},liveErr:{},loading:{},selected:null,rankBy:"real",weight:60,open:{},ota:{},otaErr:{},otaLoading:{},autoRefresh:false,lastUpdated:null};
   uid=1;
   var d=new Date();d.setDate(d.getDate()+21);var v=d.toISOString().slice(0,10);S.departDate=v;
   document.getElementById('departDate').value=v;
@@ -682,7 +693,7 @@ function resetAll(){
   document.getElementById('retWrap').style.display='none';
   document.getElementById('currency').value="USD";
   document.getElementById('autoRefresh').checked=false;
-  document.getElementById('rankBy').value="est";
+  document.getElementById("rankBy").value="real";
   document.getElementById('weight').value=60;
   document.getElementById('fName').value="";document.getElementById('fOrigin').value="";
   document.getElementById('dInput').value="";document.getElementById('planBox').value="";
