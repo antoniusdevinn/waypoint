@@ -121,6 +121,7 @@
   .badge{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:30px;border:1px solid var(--line-strong);color:var(--muted);flex:none;background:#fff}
   .badge.pin{color:var(--jade);border-color:var(--jade);background:var(--jade-tint)}
   .badge.arr{color:var(--jade);border-color:var(--teal-dim);background:var(--jade-tint)}
+  .badge.ret{color:var(--jade);border-color:var(--teal-dim);background:var(--jade-tint)}
   .badge.live{color:var(--good);border-color:var(--good);background:#EAF6EF}
   .chev{color:var(--muted2);transition:transform .18s;flex:none}.dest.open .chev{transform:rotate(90deg)}
   .dest-body{display:none;border-top:1px solid var(--line);padding:6px 16px 16px;background:#FAFCFB}
@@ -159,8 +160,8 @@
   .recfoot .win b{color:var(--jade)}.recfoot .sum b{color:var(--amber);font-size:16px}
   @media(max-width:620px){.recrow{grid-template-columns:1fr auto}.recrow .rprice{grid-column:2;text-align:right}.recrow .rtime{grid-column:1 / -1;text-align:left}}
 
-  .colhead{display:grid;grid-template-columns:1.6fr .8fr .8fr;gap:10px;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);padding:10px 0 2px;font-weight:600}
-  .legrow{display:grid;grid-template-columns:1.6fr .8fr .8fr;gap:10px;align-items:start;padding:11px 0;border-bottom:1px solid var(--line)}
+  .colhead{display:grid;grid-template-columns:1.4fr .7fr .7fr .7fr;gap:10px;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);padding:10px 0 2px;font-weight:600}
+  .legrow{display:grid;grid-template-columns:1.4fr .7fr .7fr .7fr;gap:10px;align-items:start;padding:11px 0;border-bottom:1px solid var(--line)}
   .legrow:last-child{border-bottom:none}
   .legrow .who{font-weight:600;font-size:14px}
   .legrow .who small{display:block;color:var(--muted);font-family:var(--mono);font-size:11.5px;font-weight:400}
@@ -326,8 +327,10 @@ function destStats(dest){const D=AP[dest],ors=originAirports();
   ors.forEach(({f})=>{const e=pr[f.id];if(e&&e.price!=null&&!isNaN(e.price)){realTotal+=e.price;realCount++;}else haveAll=false;});
   const mins=[];ors.forEach(({f})=>{const e=pr[f.id];if(e&&e.arrive){const[h,m]=e.arrive.split(':').map(Number);if(!isNaN(h))mins.push(h*60+m);}});
   let spread=mins.length>=2?Math.max(...mins)-Math.min(...mins):null;
+  const retMins=[];ors.forEach(({f})=>{const e=pr[f.id];if(e&&e.retDepart){const[h,m]=e.retDepart.split(':').map(Number);if(!isNaN(h))retMins.push(h*60+m);}});
+  let retSpread=retMins.length>=2?Math.max(...retMins)-Math.min(...retMins):null;
   const hasLive=!!(S.live[dest]&&Object.values(S.live[dest]).some(a=>a&&a.length));
-  return {iata:dest,dest:D,per,estTotal,maxKm,realTotal,haveAll,realCount,spread,hasLive};}
+  return {iata:dest,dest:D,per,estTotal,maxKm,realTotal,haveAll,realCount,spread,retSpread,hasLive};}
 function rankedDestinations(){
   const origins=new Set(S.friends.filter(f=>f.iata).map(f=>f.iata));if(origins.size===0)return[];
   let all=AIRPORTS.map(a=>a[0]).map(destStats).sort((x,y)=>x.estTotal-y.estTotal);
@@ -374,7 +377,7 @@ function recommend(dest){
   combos.forEach(c=>c.score=cW*nm(c.cost,cMin,cMax)+sW*nm(c.spread+c.retSpread,tMin,tMax));
   combos.sort((a,b)=>a.score-b.score);
   return combos[0];}
-function applyRecommendation(dest){const rec=recommend(dest);if(!rec)return;S.prices[dest]=S.prices[dest]||{};rec.sel.forEach(s=>{S.prices[dest][s.fid]={price:s.offer.price,arrive:clock(s.offer.out.arriveAt)};});}
+function applyRecommendation(dest){const rec=recommend(dest);if(!rec)return;S.prices[dest]=S.prices[dest]||{};rec.sel.forEach(s=>{S.prices[dest][s.fid]={price:s.offer.price,arrive:clock(s.offer.out.arriveAt),retDepart:s.offer.ret?clock(s.offer.ret.departAt):""};});}
 
 /* ----------------------------- live fetch ----------------------------- */
 async function pingLive(){try{const r=await fetch('/api/search');const j=await r.json();liveMode=(j&&j.error&&/credentials/i.test(j.error))?'nokey':true;}catch(e){liveMode=false;}setLiveChip();}
@@ -571,12 +574,12 @@ function renderResults(){const box=document.getElementById('results');box.innerH
     const metricMain=showReal
       ?`<div class="metric cheapest"><div class="v">${fmtCur(d.realTotal)}${d.haveAll?'':'*'}</div><div class="k">${d.hasLive?'live':'your'} total${d.haveAll?'':' (partial)'}</div></div>`
       :`<div class="metric ${i===0?'cheapest':''}"><div class="v">${fmtUSD(d.estTotal)}</div><div class="k">est. group fare</div></div>`;
-    const arrBadge=d.spread!=null?`<span class="badge arr">⏱ ${fmtSpread(d.spread)} apart</span>`:'';
+    const arrBadge=d.spread!=null?`<span class="badge arr">⏱ ${fmtSpread(d.spread)} apart</span>`:'';const retBadge=d.retSpread!=null?`<span class="badge ret">↩ ${fmtSpread(d.retSpread)} apart</span>`:'';
     wrap.innerHTML=`<div class="dest-head" data-toggle="${d.iata}">
       <div class="rankno">${i+1}</div>
       <div class="dest-id"><div class="code">${d.iata}</div><div class="place">${escapeHtml(d.dest.city)}, ${escapeHtml(d.dest.country)}</div></div>
       <div class="dest-spacer"></div>
-      ${isPin?'<span class="badge pin">📌 pinned</span>':''}${d.hasLive?'<span class="badge live">● live</span>':''}${arrBadge}
+      ${isPin?'<span class="badge pin">📌 pinned</span>':''}${d.hasLive?'<span class="badge live">● live</span>':''}${arrBadge}${retBadge}
       <div class="metric"><div class="v">${d.maxKm.toLocaleString()}</div><div class="k">km (farthest)</div></div>
       ${metricMain}
       <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -591,7 +594,7 @@ function renderResults(){const box=document.getElementById('results');box.innerH
         </div>
         ${otaPanel(d.iata)}
         ${recPanel(d.iata)}
-        <div class="colhead"><span>Traveler</span><span>Fare (${CUR[S.currency]||S.currency})</span><span>Arrives</span></div>
+        <div class="colhead"><span>Traveler</span><span>Fare (${CUR[S.currency]||S.currency})</span><span>Arrives</span><span>Returns</span></div>
         ${d.per.map(p=>legRow(d.iata,p)).join("")}
         <div class="body-foot">
           <span>${d.hasLive?'Live fares loaded. Move the slider to rebalance cheapest vs landing together — the recommendation updates as you drag.':'Open a source, grab the cheapest fare &amp; arrival, type them in — or pull live fares above.'}</span>
@@ -619,6 +622,7 @@ function legRow(dest,p){const pr=(S.prices[dest]&&S.prices[dest][p.fid])||{};
     <div class="who">${escapeHtml(p.name||'—')}<small>${p.from.iata} · ${p.km.toLocaleString()} km · ~${fmtUSD(p.est)}</small>${optHtml}</div>
     <div><input type="number" min="0" placeholder="0" value="${pr.price!=null?pr.price:''}" data-price data-dest="${dest}" data-fid="${p.fid}"></div>
     <div><input type="time" value="${pr.arrive||''}" data-arrive data-dest="${dest}" data-fid="${p.fid}"></div>
+    <div><input type="time" value="${pr.retDepart||''}" data-retdepart data-dest="${dest}" data-fid="${p.fid}"></div>
   </div>`;}
 
 /* ----------------------------- convergence ----------------------------- */
@@ -675,9 +679,9 @@ document.getElementById('results').addEventListener('click',e=>{
   const pull=e.target.closest('[data-pull]');if(pull){e.stopPropagation();pullLive(pull.dataset.pull);return;}
   const ota=e.target.closest('[data-ota]');if(ota){e.stopPropagation();pullOTA(ota.dataset.ota);return;}
   const use=e.target.closest('[data-ota-use]');if(use){e.stopPropagation();const[dest,fid]=use.dataset.otaUse.split('|');const best=otaBest(dest,+fid);if(!best)return;S.prices[dest]=S.prices[dest]||{};S.prices[dest][+fid]={price:best.price,arrive:best.arrive};S.rankBy='real';document.getElementById('rankBy').value='real';toast(best.kind==="rt"?"Cheapest round-trip ticket applied.":"Cheapest site total applied.");render();return;}
-  const pick=e.target.closest('[data-pick]');if(pick){e.stopPropagation();const[dest,fid,idx]=pick.dataset.pick.split('|');const o=S.live[dest][+fid][+idx];S.prices[dest]=S.prices[dest]||{};S.prices[dest][+fid]={price:o.price,arrive:clock(o.out.arriveAt)};render();return;}
+  const pick=e.target.closest('[data-pick]');if(pick){e.stopPropagation();const[dest,fid,idx]=pick.dataset.pick.split('|');const o=S.live[dest][+fid][+idx];S.prices[dest]=S.prices[dest]||{};S.prices[dest][+fid]={price:o.price,arrive:clock(o.out.arriveAt),retDepart:o.ret?clock(o.ret.departAt):""};render();return;}
   const head=e.target.closest('[data-toggle]');if(head){const id=head.dataset.toggle;const willOpen=!S.open[id];S.open[id]=willOpen;S.selected=id;render();if(willOpen&&S.departDate&&originAirports().length&&!(S.live[id]&&Object.values(S.live[id]).some(a=>a&&a.length))){pullLive(id);}return;}});
-document.getElementById('results').addEventListener('input',e=>{const t=e.target;if(t.dataset.price!==undefined||t.dataset.arrive!==undefined){const dest=t.dataset.dest,fid=+t.dataset.fid;S.prices[dest]=S.prices[dest]||{};S.prices[dest][fid]=S.prices[dest][fid]||{price:null,arrive:""};if(t.dataset.price!==undefined)S.prices[dest][fid].price=t.value===''?null:parseFloat(t.value);if(t.dataset.arrive!==undefined)S.prices[dest][fid].arrive=t.value;renderConverge();}});
+document.getElementById('results').addEventListener('input',e=>{const t=e.target;if(t.dataset.price!==undefined||t.dataset.arrive!==undefined||t.dataset.retdepart!==undefined){const dest=t.dataset.dest,fid=+t.dataset.fid;S.prices[dest]=S.prices[dest]||{};S.prices[dest][fid]=S.prices[dest][fid]||{price:null,arrive:"",retDepart:""};if(t.dataset.price!==undefined)S.prices[dest][fid].price=t.value===''?null:parseFloat(t.value);if(t.dataset.arrive!==undefined)S.prices[dest][fid].arrive=t.value;if(t.dataset.retdepart!==undefined)S.prices[dest][fid].retDepart=t.value;renderConverge();}});
 
 /* quick crew */
 const QUICK=[["Mei","SIN"],["Arman","KUL"],["Lena","CGK"],["Noor","DXB"],["Sam","LHR"]];
