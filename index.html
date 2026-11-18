@@ -392,7 +392,11 @@ async function pullLive(dest){
     }catch(e){err="Can't reach the live-fare server. Run "+'`node server.js`'+" (see README) — using estimates for now.";liveMode=false;setLiveChip();}
   }
   S.loading[dest]=false;
-  if(got>0){applyRecommendation(dest);S.rankBy='real';document.getElementById('rankBy').value='real';S.open[dest]=true;S.lastUpdated=new Date().toISOString();setUpdated();}
+  if(got>0){applyRecommendation(dest);S.rankBy='real';document.getElementById('rankBy').value='real';S.open[dest]=true;S.lastUpdated=new Date().toISOString();setUpdated();render();
+    // Auto-compare Trip / Traveloka / Agoda once live fares are in, so
+    // nobody has to press the compare button too.
+    if(!otaHas(dest))pullOTA(dest,{quiet:true});
+    return;}
   else{S.liveErr[dest]=err||"No live flights returned for this route (free test data is limited — try a major hub or a production key).";}
   render();}
 
@@ -597,9 +601,9 @@ function renderResults(){const box=document.getElementById('results');box.innerH
     box.appendChild(wrap);});}
 
 function recPanel(dest){const rec=recommend(dest);if(!rec)return"";
-  const rows=rec.sel.map(s=>{const o=s.offer;const ret=o.ret?`<br><span class="retline">↩ ${dayLbl(o.ret.departAt)} ${clock(o.ret.departAt)} → <b>${dayLbl(o.ret.arriveAt)} ${clock(o.ret.arriveAt)}</b>${o.ret.flightNo?` · ${o.ret.flightNo}`:''} · ${stopLbl(o.ret.stops)}</span>`:"";return `<div class="recrow">
-    <div class="rwho">${escapeHtml(s.name||'—')}<small>${o.flightNo} · ${stopLbl(o.out.stops)} · ${durLbl(o.out.durationMin)}</small></div>
-    <div class="rtime">${dayLbl(o.out.departAt)} ${clock(o.out.departAt)} → <b>${dayLbl(o.out.arriveAt)} ${clock(o.out.arriveAt)}</b>${ret}</div>
+  const rows=rec.sel.map(s=>{const o=s.offer;const ret=o.ret?`<br><span class="retline">↩ ${o.ret.flightNo?`${o.ret.flightNo} · `:''}${dayLbl(o.ret.departAt)} ${clock(o.ret.departAt)} → <b>${dayLbl(o.ret.arriveAt)} ${clock(o.ret.arriveAt)}</b> · ${stopLbl(o.ret.stops)}</span>`:"";return `<div class="recrow">
+    <div class="rwho">${escapeHtml(s.name||'—')}</div>
+    <div class="rtime">${o.flightNo} · ${dayLbl(o.out.departAt)} ${clock(o.out.departAt)} → <b>${dayLbl(o.out.arriveAt)} ${clock(o.out.arriveAt)}</b> · ${stopLbl(o.out.stops)} · ${durLbl(o.out.durationMin)}${ret}</div>
     <div class="rprice">${fmtCur(o.price)}</div></div>`;}).join("");
   return `<div class="rec"><h3>Recommended schedule — land together, return together</h3>
     <p class="recsub">Best one-flight-each combination at your current balance. Outbound arrivals close together, and return departures close together. Times are local at each airport.</p>
@@ -609,8 +613,8 @@ function recPanel(dest){const rec=recommend(dest);if(!rec)return"";
 function legRow(dest,p){const pr=(S.prices[dest]&&S.prices[dest][p.fid])||{};
   const offers=(S.live[dest]&&S.live[dest][p.fid])||[];
   let optHtml="";
-  if(offers.length){optHtml=`<details class="opts"><summary>▸ ${offers.length} live option${offers.length>1?'s':''}</summary>`+
-    offers.slice(0,8).map((o,idx)=>`<div class="opt"><span>${o.flightNo} · ${clock(o.out.departAt)}→<b>${clock(o.out.arriveAt)}</b> · ${stopLbl(o.out.stops)}${o.ret?` · ↩ ${clock(o.ret.departAt)}→<b>${clock(o.ret.arriveAt)}</b>${o.ret.flightNo?` (${o.ret.flightNo})`:''}`:''}</span><span><b>${fmtCur(o.price)}</b> <span class="pk" data-pick="${dest}|${p.fid}|${idx}">use</span></span></div>`).join("")+`</details>`;}
+  if(offers.length){const minP=Math.min(...offers.map(o=>o.price));optHtml=`<details class="opts"><summary>▸ ${offers.length} live option${offers.length>1?'s':''}</summary>`+
+    offers.slice(0,8).map((o,idx)=>`<div class="opt"><span>${o.flightNo} · ${clock(o.out.departAt)}→<b>${clock(o.out.arriveAt)}</b> · ${stopLbl(o.out.stops)}${o.ret?` · ↩ ${clock(o.ret.departAt)}→<b>${clock(o.ret.arriveAt)}</b>${o.ret.flightNo?` (${o.ret.flightNo})`:''}`:''}${o.price===minP?' ★ cheapest':''}</span><span><b>${fmtCur(o.price)}</b> <span class="pk" data-pick="${dest}|${p.fid}|${idx}">use</span></span></div>`).join("")+`</details>`;}
   return `<div class="legrow">
     <div class="who">${escapeHtml(p.name||'—')}<small>${p.from.iata} · ${p.km.toLocaleString()} km · ~${fmtUSD(p.est)}</small>${optHtml}</div>
     <div><input type="number" min="0" placeholder="0" value="${pr.price!=null?pr.price:''}" data-price data-dest="${dest}" data-fid="${p.fid}"></div>
@@ -623,14 +627,16 @@ function renderConverge(){const host=document.getElementById('convSvg'),stats=do
   const D=AP[S.selected],cx=300,cy=185,W=600,H=370,rMin=46,rMax=158;
   const pts=ors.map(({f,a})=>({name:f.name,a,km:haversine(a,D),brg:bearing(D,a)}));
   const maxKm=Math.max(...pts.map(p=>p.km),1),scale=km=>km<=0?0:rMin+(rMax-rMin)*Math.sqrt(km/maxKm);
-  let rings="";[0.5,1].forEach(fr=>{const rr=rMin+(rMax-rMin)*fr;rings+=`<circle cx="${cx}" cy="${cy}" r="${rr}" fill="none" stroke="rgba(255,255,255,.06)"/><text x="${cx+rr}" y="${cy-4}" fill="#5C658E" font-size="10" font-family="ui-monospace,monospace">${Math.round(maxKm*fr).toLocaleString()} km</text>`;});
+  // Rings are just distance guides (no labels — the labels were confusing).
+  let rings="";[0.5,1].forEach(fr=>{const rr=rMin+(rMax-rMin)*fr;rings+=`<circle cx="${cx}" cy="${cy}" r="${rr}" fill="none" stroke="rgba(255,255,255,.06)"/>`;});
   let spokes="",dots="";pts.forEach(p=>{const r=scale(p.km),th=toR(p.brg),x=cx+r*Math.sin(th),y=cy-r*Math.cos(th);
     spokes+=`<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="rgba(79,209,197,.30)" stroke-width="1.4"/><line class="flow" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${cx}" y2="${cy}" stroke="var(--teal)" stroke-width="1.6"/>`;
     const lx=x+(x<cx?-6:6),anchor=x<cx?'end':'start';
-    dots+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="var(--amber)"/><text x="${lx.toFixed(1)}" y="${(y-9).toFixed(1)}" fill="#EAEDFA" font-size="11.5" font-weight="700" text-anchor="${anchor}" font-family="ui-monospace,monospace">${p.a.iata}</text><text x="${lx.toFixed(1)}" y="${(y+5).toFixed(1)}" fill="#8A93BC" font-size="10" text-anchor="${anchor}">${escapeHtml(truncate(p.name||p.a.city,12))}</text>`;});
+    dots+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="var(--amber)"/><text x="${lx.toFixed(1)}" y="${(y-9).toFixed(1)}" fill="#EAEDFA" font-size="11.5" font-weight="700" text-anchor="${anchor}" font-family="ui-monospace,monospace">${p.a.iata}</text><text x="${lx.toFixed(1)}" y="${(y+5).toFixed(1)}" fill="#8A93BC" font-size="10" text-anchor="${anchor}">${escapeHtml(truncate(p.name||p.a.city,12))}</text><text x="${lx.toFixed(1)}" y="${(y+17).toFixed(1)}" fill="#8A93BC" font-size="10" text-anchor="${anchor}">${p.km.toLocaleString()} km</text>`;});
   host.innerHTML=`<svg viewBox="0 0 ${W} ${H}">${rings}${spokes}${dots}<circle class="pulse" cx="${cx}" cy="${cy}" r="7" fill="var(--teal)"/><circle cx="${cx}" cy="${cy}" r="14" fill="none" stroke="var(--teal)" stroke-opacity=".4"/><text x="${cx}" y="${cy+30}" fill="#EAEDFA" font-size="14" font-weight="800" text-anchor="middle" font-family="ui-monospace,monospace">${D.iata}</text><text x="${cx}" y="${cy+45}" fill="#8A93BC" font-size="10.5" text-anchor="middle">${escapeHtml(D.city)}</text></svg>`;
   const tot=pts.reduce((s,p)=>s+p.km,0),far=pts.reduce((m,p)=>p.km>m.km?p:m,pts[0]);
-  stats.innerHTML=`Meeting at <strong style="color:var(--teal)">${D.city} (${D.iata})</strong>.<br>Combined distance flown: <strong>${tot.toLocaleString()} km</strong>.<br>Farthest: <strong>${escapeHtml(far.name||far.a.city)}</strong>, ${far.km.toLocaleString()} km.`;}
+  const perLine=pts.map(p=>`${escapeHtml(p.name||p.a.city)} (${p.a.iata}): ${p.km.toLocaleString()} km`).join(' · ');
+  stats.innerHTML=`Meeting at <strong style="color:var(--teal)">${D.city} (${D.iata})</strong>.<br>${perLine}<br>Combined distance flown: <strong>${tot.toLocaleString()} km</strong>.<br>Farthest: <strong>${escapeHtml(far.name||far.a.city)}</strong>, ${far.km.toLocaleString()} km.`;}
 
 /* ----------------------------- helpers ----------------------------- */
 function escapeHtml(s){return(s||"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -654,7 +660,10 @@ document.getElementById('pinned').addEventListener('click',e=>{const p=e.target.
 document.getElementById('departDate').addEventListener('change',e=>{S.departDate=e.target.value;render();});
 document.getElementById('returnDate').addEventListener('change',e=>{S.returnDate=e.target.value;render();});
 document.getElementById('roundTrip').addEventListener('change',e=>{S.roundTrip=e.target.checked;document.getElementById('retWrap').style.display=S.roundTrip?'block':'none';render();});
-document.getElementById('currency').addEventListener('change',e=>{S.currency=e.target.value;render();});
+document.getElementById('currency').addEventListener('change',e=>{S.currency=e.target.value;render();
+  // Prices already fetched are in the old currency, so re-fetch them in
+  // the new currency — otherwise only the symbol changes, not the amount.
+  Object.keys(S.live).forEach(dest=>{if(S.live[dest]&&Object.values(S.live[dest]).some(a=>a&&a.length)){S.live[dest]={};S.ota[dest]={};pullLive(dest);}});});
 document.getElementById('autoRefresh').addEventListener('change',e=>{S.autoRefresh=e.target.checked;
   if(S.autoRefresh){toast("Auto-refresh on — re-checking every 30 minutes while this page is open.");autoRefreshAll();}
   else toast("Auto-refresh off.");});
@@ -667,7 +676,7 @@ document.getElementById('results').addEventListener('click',e=>{
   const ota=e.target.closest('[data-ota]');if(ota){e.stopPropagation();pullOTA(ota.dataset.ota);return;}
   const use=e.target.closest('[data-ota-use]');if(use){e.stopPropagation();const[dest,fid]=use.dataset.otaUse.split('|');const best=otaBest(dest,+fid);if(!best)return;S.prices[dest]=S.prices[dest]||{};S.prices[dest][+fid]={price:best.price,arrive:best.arrive};S.rankBy='real';document.getElementById('rankBy').value='real';toast(best.kind==="rt"?"Cheapest round-trip ticket applied.":"Cheapest site total applied.");render();return;}
   const pick=e.target.closest('[data-pick]');if(pick){e.stopPropagation();const[dest,fid,idx]=pick.dataset.pick.split('|');const o=S.live[dest][+fid][+idx];S.prices[dest]=S.prices[dest]||{};S.prices[dest][+fid]={price:o.price,arrive:clock(o.out.arriveAt)};render();return;}
-  const head=e.target.closest('[data-toggle]');if(head){const id=head.dataset.toggle;S.open[id]=!S.open[id];S.selected=id;render();}});
+  const head=e.target.closest('[data-toggle]');if(head){const id=head.dataset.toggle;const willOpen=!S.open[id];S.open[id]=willOpen;S.selected=id;render();if(willOpen&&S.departDate&&originAirports().length&&!(S.live[id]&&Object.values(S.live[id]).some(a=>a&&a.length))){pullLive(id);}return;}});
 document.getElementById('results').addEventListener('input',e=>{const t=e.target;if(t.dataset.price!==undefined||t.dataset.arrive!==undefined){const dest=t.dataset.dest,fid=+t.dataset.fid;S.prices[dest]=S.prices[dest]||{};S.prices[dest][fid]=S.prices[dest][fid]||{price:null,arrive:""};if(t.dataset.price!==undefined)S.prices[dest][fid].price=t.value===''?null:parseFloat(t.value);if(t.dataset.arrive!==undefined)S.prices[dest][fid].arrive=t.value;renderConverge();}});
 
 /* quick crew */

@@ -156,6 +156,9 @@ module.exports = async (req, res) => {
       offers.forEach(o => delete o.departure_token);
     }
 
+    // Cheapest first, so the live-options list and the recommendation
+    // both read in price order.
+    offers.sort((a, b) => a.price - b.price);
     return res.status(200).json({ ok: true, offers });
   } catch (e) {
     return res.status(200).json({ ok: false, error: "Live fare lookup failed: " + (e && e.message ? e.message : e) });
